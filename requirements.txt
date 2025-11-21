@@ -1,4 +1,3 @@
-streamlit
-google-genai
-pillow
-python-dotenv
+# Questo file è stato svuotato per correggere il deploy su Netlify.
+# Il progetto è React/Vite, non Python.
+# Netlify rileva questo file e prova a installare dipendenze Python fallendo.
