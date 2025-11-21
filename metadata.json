@@ -1,0 +1,5 @@
+{
+  "name": "HeroMorph",
+  "description": "Trasforma le tue foto in supereroi mantenendo i tuoi tratti somatici utilizzando Gemini 2.5 Flash Image.",
+  "requestFramePermissions": []
+}
