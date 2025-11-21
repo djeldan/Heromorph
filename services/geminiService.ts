@@ -18,20 +18,20 @@ export const transformToSuperhero = async (
   
   const apiKey = process.env.API_KEY;
   
-  // DEBUG: Loggare (parzialmente) cosa vede l'app
-  const keyStatus = apiKey 
-    ? `Presente (inizia con ${apiKey.substring(0, 4)}...)` 
-    : "ASSENTE/UNDEFINED";
+  // DEBUG: Loggare cosa vede l'app (sicuro, mostra solo i primi caratteri)
+  const keyPreview = apiKey && apiKey.length > 5 
+    ? `${apiKey.substring(0, 5)}...` 
+    : (apiKey ? "TOO_SHORT" : "UNDEFINED");
     
-  console.log(`[GeminiService] Controllo API Key: ${keyStatus}`);
+  console.log(`[GeminiService] API Key Status: ${apiKey ? 'PRESENT' : 'MISSING'} (Value: ${keyPreview})`);
 
   // Controllo rigoroso della Chiave API per debugging su Netlify
   if (!apiKey || apiKey.trim() === '') {
-    throw new Error(`CONFIGURAZIONE MANCANTE (Status: ${keyStatus}). L'app non trova la chiave API. Su Netlify, assicurati che la variabile sia 'API_KEY' (o 'VITE_API_KEY') e fai un REDEPLOY (Clear cache and deploy site) dopo averla inserita.`);
+    throw new Error(`ERRORE CONFIGURAZIONE: L'app non trova la chiave API. Se l'hai inserita su Netlify, devi fare un nuovo 'Trigger Deploy' > 'Clear cache and deploy site' per applicarla.`);
   }
 
   if (!apiKey.startsWith("AIza")) {
-    throw new Error(`CHIAVE NON VALIDA (Status: ${keyStatus}). La chiave rilevata non sembra una chiave Google valida (deve iniziare con 'AIza'). Controlla di non aver incollato spazi extra o virgolette su Netlify.`);
+    throw new Error(`CHIAVE NON VALIDA (Vedo: ${keyPreview}). La chiave rilevata non sembra valida (deve iniziare con 'AIza'). Controlla spazi vuoti su Netlify.`);
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -56,8 +56,7 @@ export const transformToSuperhero = async (
   `;
 
   // Strategia Retry Conservativa per Piano Gratuito su Netlify
-  // Il piano free ha limiti di circa 15 RPM (Requests Per Minute).
-  // Se facciamo retry troppo veloci, bruciamo la quota in un attimo.
+  // Il piano free ha limiti severi. Aumentiamo i tempi di attesa.
   const MAX_RETRIES = 3;
   let lastError: any = null;
 
@@ -91,8 +90,7 @@ export const transformToSuperhero = async (
         }
       }
       
-      // Se arriviamo qui, il modello ha risposto ma senza immagine (forse solo testo o safety block)
-      // Controlliamo se c'è un finishReason di sicurezza
+      // Se arriviamo qui, il modello ha risposto ma senza immagine
       if (candidate?.finishReason === "SAFETY") {
         throw new Error("SAFETY_BLOCK");
       }
@@ -103,29 +101,25 @@ export const transformToSuperhero = async (
       lastError = error;
       console.warn(`Attempt ${attempt} failed:`, error.message);
 
-      // Gestione specifica errori
       const isQuotaError = error.message?.includes("429") || error.message?.includes("Too Many Requests") || error.message?.includes("Resource has been exhausted");
       const isServerBusy = error.message?.includes("503") || error.message?.includes("Overloaded");
       const isSafety = error.message?.includes("SAFETY");
 
       if (isSafety) {
-        throw new Error("L'immagine è stata bloccata dai filtri di sicurezza di Google. Prova con una foto diversa o una posa meno 'aggressiva'.");
+        throw new Error("L'immagine è stata bloccata dai filtri di sicurezza (Safety). Prova con una foto diversa.");
       }
 
       if ((isQuotaError || isServerBusy) && attempt < MAX_RETRIES) {
-        // Aumento i tempi di attesa: 8s, 15s, 22s per Netlify Free Tier
-        const waitTime = 7000 * attempt; 
+        // Aumento drastico dei tempi di attesa per evitare il ban temporaneo
+        const waitTime = 10000 * attempt; // 10s, 20s, 30s
         const seconds = waitTime / 1000;
 
-        const retryMsg = isQuotaError 
-          ? `Traffico intenso (Limite Free Tier). Attendo ${seconds}s per ricaricare i token... (Tentativo ${attempt}/${MAX_RETRIES})`
-          : `Server Google occupato. Riprovo tra ${seconds}s... (Tentativo ${attempt}/${MAX_RETRIES})`;
+        const retryMsg = `Server occupato o Limite Traffico. Attendo ${seconds} secondi... (Tentativo ${attempt}/${MAX_RETRIES})`;
         
         if (onStatusUpdate) onStatusUpdate(retryMsg);
         await wait(waitTime);
         continue;
       } else {
-        // Errore non recuperabile o tentativi finiti
         break;
       }
     }
@@ -133,24 +127,24 @@ export const transformToSuperhero = async (
 
   console.error("Gemini API Error Final:", lastError);
   
-  // Messaggi utente finali chiari
+  // Traduzione errori per l'utente
   let errorMessage = "Si è verificato un errore imprevisto.";
   const errString = lastError?.toString() || "";
   
   if (errString.includes("400")) {
-    errorMessage = "Immagine non valida o corrotta. Prova a ricaricare la pagina o usare un'altra foto.";
+    errorMessage = "Richiesta non valida (400). L'immagine potrebbe essere troppo grande o corrotta.";
   } else if (errString.includes("403")) {
-    errorMessage = `Accesso Negato (403). La Chiave API (${keyStatus}) potrebbe non essere abilitata per Gemini API o il progetto Google Cloud ha problemi di fatturazione.`;
-  } else if (errString.includes("429") || errString.includes("Resource has been exhausted")) {
-    errorMessage = "Troppe richieste in poco tempo. Il piano gratuito di Google ha un limite. Attendi 1 minuto completo e riprova.";
-  } else if (errString.includes("SAFETY") || errString.includes("blocked")) {
-    errorMessage = "L'immagine generata violava le policy di sicurezza (violenza, contenuti espliciti, ecc). Riprova con un prompt più tranquillo.";
-  } else if (errString.includes("API Key")) {
-      errorMessage = "Problema Chiave API. Verifica le variabili d'ambiente su Netlify.";
-  } else if (errString.includes("fetch failed")) {
-      errorMessage = "Errore di connessione. Controlla la tua rete.";
+    errorMessage = `Accesso Negato (403). La chiave API è corretta (${keyPreview}) ma potrebbe non essere abilitata per questo modello o il progetto Google Cloud non ha il billing collegato (necessario per alcuni modelli).`;
+  } else if (errString.includes("429") || errString.includes("exhausted")) {
+    errorMessage = "Limite richieste superato (429). Il piano gratuito permette poche immagini al minuto. Attendi 60 secondi e riprova.";
+  } else if (errString.includes("SAFETY")) {
+    errorMessage = "Blocco Sicurezza: L'IA ha ritenuto l'immagine o il prompt inappropriati.";
+  } else if (errString.includes("ERRORE CONFIGURAZIONE") || errString.includes("CHIAVE NON VALIDA")) {
+    errorMessage = lastError.message; // Messaggio custom creato sopra
+  } else if (errString.includes("fetch")) {
+    errorMessage = "Errore di connessione. Controlla la rete.";
   } else {
-      errorMessage = `Errore API: ${lastError?.message || errString}`;
+    errorMessage = `Errore API: ${lastError?.message || errString}`;
   }
   
   throw new Error(errorMessage);

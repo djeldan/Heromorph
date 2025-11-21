@@ -6,7 +6,7 @@ import { ProcessingView } from './components/ProcessingView';
 import { ResultView } from './components/ResultView';
 import { transformToSuperhero } from './services/geminiService';
 import { AppStatus } from './types';
-import { Wand2, AlertCircle, Info } from 'lucide-react';
+import { Wand2, AlertCircle, Info, Settings } from 'lucide-react';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
@@ -159,25 +159,28 @@ const App: React.FC = () => {
                     {error}
                   </p>
                   
-                  {(error.includes("Netlify") || error.includes("API")) && (
-                    <div className="mt-2 pl-8">
+                  {(error.includes("CONFIGURAZIONE") || error.includes("CHIAVE") || error.includes("403")) && (
+                    <div className="mt-3 pl-8 flex flex-wrap gap-3">
                         <a 
                           href="https://app.netlify.com" 
                           target="_blank" 
                           rel="noopener noreferrer"
-                          className="text-xs bg-red-500/20 hover:bg-red-500/30 text-red-300 px-3 py-1 rounded border border-red-500/30 transition-colors"
+                          className="flex items-center gap-2 text-xs bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg border border-slate-600 transition-colors"
                         >
-                          Apri Netlify Dashboard
+                          <Settings size={14} /> Vai su Netlify
                         </a>
+                        <div className="text-xs text-slate-400 flex items-center">
+                           Importante: Dopo aver salvato la Key, fai "Trigger Deploy" {'>'} "Clear cache".
+                        </div>
                     </div>
                   )}
                 </div>
                 
-                {error.includes("Traffico") && (
+                {(error.includes("Limite") || error.includes("Traffico")) && (
                    <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-blue-300 flex items-start gap-3 text-xs max-w-2xl mx-auto">
                       <Info size={16} className="flex-shrink-0 mt-0.5" />
                       <p>
-                        <strong>Consiglio:</strong> L'API gratuita ha un "contatore" al minuto. Se vedi questo errore, aspetta semplicemente un minuto senza cliccare, poi riprova.
+                        <strong>Consiglio Pro:</strong> Stai usando il piano gratuito. Aspetta un minuto completo prima di riprovare per ricaricare la tua quota.
                       </p>
                    </div>
                 )}
