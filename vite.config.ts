@@ -11,7 +11,8 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     define: {
       // Expose env variables to the client securely
-      'process.env.API_KEY': JSON.stringify(env.API_KEY)
+      // Use a fallback empty string to prevent 'undefined' replacement if variable is missing
+      'process.env.API_KEY': JSON.stringify(env.API_KEY || '')
     },
     build: {
       outDir: 'dist',

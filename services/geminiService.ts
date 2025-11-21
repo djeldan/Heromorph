@@ -1,9 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
 
-// Initialize the Google GenAI client
-// NOTE: process.env.API_KEY is injected by the environment via Vite
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 /**
  * Transforms the user's image into a superhero version using Gemini 2.5 Flash Image.
  * 
@@ -16,6 +12,16 @@ export const transformToSuperhero = async (
   heroPrompt: string
 ): Promise<string> => {
   
+  // Initialize the client inside the function to prevent top-level crashes on app load
+  // if the API key is missing from the environment variables.
+  const apiKey = process.env.API_KEY;
+  
+  if (!apiKey) {
+    throw new Error("API Key non trovata. Assicurati di aver configurato la variabile d'ambiente API_KEY nelle impostazioni di Netlify.");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+
   // Extract MIME type and Clean Base64 data dynamically
   // Format expected: "data:image/jpeg;base64,/9j/4AAQSku..."
   const mimeMatch = imageBase64.match(/^data:(image\/[a-zA-Z+]+);base64,/);
@@ -77,12 +83,15 @@ export const transformToSuperhero = async (
     
     // Better error message for user
     let errorMessage = "Si è verificato un errore durante la trasformazione.";
+    
     if (error.message?.includes("400")) {
       errorMessage = "Errore nell'immagine inviata o nella richiesta. Riprova con un'altra foto.";
     } else if (error.message?.includes("429")) {
       errorMessage = "Troppe richieste. Attendi qualche secondo e riprova.";
     } else if (error.message?.includes("SAFETY")) {
       errorMessage = "L'immagine o la descrizione violano le policy di sicurezza. Riprova.";
+    } else if (error.message?.includes("API Key")) {
+        errorMessage = error.message;
     }
     
     throw new Error(errorMessage);
