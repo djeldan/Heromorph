@@ -1,5 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 /**
  * Transforms the user's image into a superhero version using Gemini 2.5 Flash Image.
  * 
@@ -45,55 +47,80 @@ export const transformToSuperhero = async (
     5. **CONTEXT**: Place them in a fitting environment for the character described.
   `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType, // Dynamically set correct mime type (png/jpeg/webp)
-              data: cleanBase64
+  const MAX_RETRIES = 3;
+  let lastError: any = null;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: mimeType, // Dynamically set correct mime type (png/jpeg/webp)
+                data: cleanBase64
+              }
+            },
+            {
+              text: prompt
             }
-          },
-          {
-            text: prompt
+          ]
+        }
+      });
+
+      // Iterate through parts to find the image
+      const candidate = response.candidates?.[0];
+      const parts = candidate?.content?.parts;
+
+      if (parts) {
+        for (const part of parts) {
+          if (part.inlineData && part.inlineData.data) {
+            // Gemini usually returns jpeg or png, but we can default to png for safety in display
+            return `data:image/png;base64,${part.inlineData.data}`;
           }
-        ]
-      }
-    });
-
-    // Iterate through parts to find the image
-    const candidate = response.candidates?.[0];
-    const parts = candidate?.content?.parts;
-
-    if (parts) {
-      for (const part of parts) {
-        if (part.inlineData && part.inlineData.data) {
-          // Gemini usually returns jpeg or png, but we can default to png for safety in display
-          return `data:image/png;base64,${part.inlineData.data}`;
         }
       }
-    }
+      
+      // If we got a response but no image, it's a soft failure, but likely not a retry-able server error
+      // unless the model filtered it.
+      throw new Error("Nessuna immagine generata. Riprova con una descrizione diversa.");
 
-    throw new Error("Nessuna immagine generata. Riprova con una descrizione diversa.");
+    } catch (error: any) {
+      lastError = error;
+      console.warn(`Attempt ${attempt} failed:`, error.message);
 
-  } catch (error: any) {
-    console.error("Gemini API Error:", error);
-    
-    // Better error message for user
-    let errorMessage = "Si è verificato un errore durante la trasformazione.";
-    
-    if (error.message?.includes("400")) {
-      errorMessage = "Errore nell'immagine inviata o nella richiesta. Riprova con un'altra foto.";
-    } else if (error.message?.includes("429")) {
-      errorMessage = "Troppe richieste. Attendi qualche secondo e riprova.";
-    } else if (error.message?.includes("SAFETY")) {
-      errorMessage = "L'immagine o la descrizione violano le policy di sicurezza. Riprova.";
-    } else if (error.message?.includes("API Key")) {
-        errorMessage = error.message;
+      // Check for Rate Limit (429) or Server Overload (503)
+      const isRetryable = error.message?.includes("429") || error.message?.includes("503");
+
+      if (isRetryable && attempt < MAX_RETRIES) {
+        // Exponential backoff: wait 2s, then 4s, then stop.
+        const delayTime = 2000 * attempt; 
+        console.log(`Retrying in ${delayTime}ms...`);
+        await wait(delayTime);
+        continue;
+      } else {
+        // If it's not a retry-able error (e.g. 400 Bad Request, Safety Filter) or max retries reached
+        break;
+      }
     }
-    
-    throw new Error(errorMessage);
   }
+
+  // If we exit the loop without returning, throw the last error nicely
+  console.error("Gemini API Error Final:", lastError);
+  
+  // Better error message for user
+  let errorMessage = "Si è verificato un errore durante la trasformazione.";
+  
+  if (lastError?.message?.includes("400")) {
+    errorMessage = "Errore nell'immagine inviata o nella richiesta. Riprova con un'altra foto.";
+  } else if (lastError?.message?.includes("429")) {
+    errorMessage = "Il server è molto occupato (Troppe richieste). Riprova tra un minuto.";
+  } else if (lastError?.message?.includes("SAFETY")) {
+    errorMessage = "L'immagine o la descrizione violano le policy di sicurezza. Riprova.";
+  } else if (lastError?.message?.includes("API Key")) {
+      errorMessage = lastError.message;
+  }
+  
+  throw new Error(errorMessage);
 };
