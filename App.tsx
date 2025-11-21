@@ -17,6 +17,7 @@ const App: React.FC = () => {
   
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadingMessage, setLoadingMessage] = useState<string>("");
 
   const handleImageSelected = (base64: string) => {
     setImage(base64);
@@ -28,6 +29,7 @@ const App: React.FC = () => {
     setCustomPrompt('');
     setStatus(AppStatus.IDLE);
     setError(null);
+    setLoadingMessage("");
   };
 
   const handleCustomChange = (text: string) => {
@@ -47,11 +49,15 @@ const App: React.FC = () => {
     }
 
     setStatus(AppStatus.PROCESSING);
+    setLoadingMessage("L'IA sta analizzando i tuoi tratti e applicando il costume da eroe...");
     setError(null);
 
     try {
-      // Passiamo l'immagine e il prompt personalizzato
-      const result = await transformToSuperhero(image, customPrompt);
+      // Passiamo l'immagine, il prompt e una callback per aggiornare lo stato in caso di retry
+      const result = await transformToSuperhero(image, customPrompt, (msg) => {
+        setLoadingMessage(msg);
+      });
+      
       setResultImage(result);
       setStatus(AppStatus.SUCCESS);
 
@@ -75,6 +81,7 @@ const App: React.FC = () => {
   const handleReset = () => {
     setStatus(AppStatus.IDLE);
     setResultImage(null);
+    setLoadingMessage("");
     // Manteniamo l'immagine caricata per facilitare nuovi tentativi
   };
 
@@ -87,7 +94,9 @@ const App: React.FC = () => {
 
       <main className="container mx-auto px-4 flex-grow pb-10">
         
-        {status === AppStatus.PROCESSING && <ProcessingView />}
+        {status === AppStatus.PROCESSING && (
+          <ProcessingView message={loadingMessage} />
+        )}
 
         {status === AppStatus.SUCCESS && resultImage && image && (
           <ResultView 
@@ -140,8 +149,8 @@ const App: React.FC = () => {
             )}
 
             {error && (
-              <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 flex items-center gap-2 animate-in slide-in-from-bottom-2 backdrop-blur-sm">
-                <AlertCircle size={20} />
+              <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 flex items-center gap-2 animate-in slide-in-from-bottom-2 backdrop-blur-sm max-w-md text-center">
+                <AlertCircle size={20} className="flex-shrink-0" />
                 <span>{error}</span>
               </div>
             )}

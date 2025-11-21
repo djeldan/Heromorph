@@ -7,32 +7,28 @@ const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
  * 
  * @param imageBase64 - The base64 string of the source image.
  * @param heroPrompt - The description of the superhero style.
+ * @param onStatusUpdate - Optional callback to report retry status to UI.
  * @returns The base64 string of the generated image.
  */
 export const transformToSuperhero = async (
   imageBase64: string, 
-  heroPrompt: string
+  heroPrompt: string,
+  onStatusUpdate?: (message: string) => void
 ): Promise<string> => {
   
-  // Initialize the client inside the function to prevent top-level crashes on app load
-  // if the API key is missing from the environment variables.
   const apiKey = process.env.API_KEY;
   
   if (!apiKey) {
-    throw new Error("API Key non trovata. Assicurati di aver configurato la variabile d'ambiente API_KEY nelle impostazioni di Netlify.");
+    throw new Error("API Key non trovata. Assicurati di aver configurato la variabile d'ambiente API_KEY.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
 
   // Extract MIME type and Clean Base64 data dynamically
-  // Format expected: "data:image/jpeg;base64,/9j/4AAQSku..."
   const mimeMatch = imageBase64.match(/^data:(image\/[a-zA-Z+]+);base64,/);
   const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-  
-  // Remove the data URL prefix to get raw base64
   const cleanBase64 = imageBase64.replace(/^data:image\/[a-zA-Z+]+;base64,/, '');
 
-  // Construct a prompt that emphasizes preserving identity and ULTRA-REALISM
   const prompt = `
     Transform the person in this input image into a superhero character based on this description: "${heroPrompt}".
     
@@ -47,7 +43,8 @@ export const transformToSuperhero = async (
     5. **CONTEXT**: Place them in a fitting environment for the character described.
   `;
 
-  const MAX_RETRIES = 3;
+  // Aumentato a 5 tentativi con backoff esponenziale per gestire meglio i limiti di quota
+  const MAX_RETRIES = 5;
   let lastError: any = null;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -58,7 +55,7 @@ export const transformToSuperhero = async (
           parts: [
             {
               inlineData: {
-                mimeType: mimeType, // Dynamically set correct mime type (png/jpeg/webp)
+                mimeType: mimeType,
                 data: cleanBase64
               }
             },
@@ -69,53 +66,55 @@ export const transformToSuperhero = async (
         }
       });
 
-      // Iterate through parts to find the image
       const candidate = response.candidates?.[0];
       const parts = candidate?.content?.parts;
 
       if (parts) {
         for (const part of parts) {
           if (part.inlineData && part.inlineData.data) {
-            // Gemini usually returns jpeg or png, but we can default to png for safety in display
             return `data:image/png;base64,${part.inlineData.data}`;
           }
         }
       }
       
-      // If we got a response but no image, it's a soft failure, but likely not a retry-able server error
-      // unless the model filtered it.
       throw new Error("Nessuna immagine generata. Riprova con una descrizione diversa.");
 
     } catch (error: any) {
       lastError = error;
       console.warn(`Attempt ${attempt} failed:`, error.message);
 
-      // Check for Rate Limit (429) or Server Overload (503)
       const isRetryable = error.message?.includes("429") || error.message?.includes("503");
 
       if (isRetryable && attempt < MAX_RETRIES) {
-        // Exponential backoff: wait 2s, then 4s, then stop.
-        const delayTime = 2000 * attempt; 
-        console.log(`Retrying in ${delayTime}ms...`);
+        // Exponential backoff: 2s, 4s, 8s, 16s... + jitter casuale
+        const baseDelay = 1000 * Math.pow(2, attempt);
+        const jitter = Math.random() * 1000;
+        const delayTime = baseDelay + jitter;
+        const seconds = Math.ceil(delayTime / 1000);
+
+        const retryMsg = `Server molto occupato. Riprovo automaticamente tra ${seconds} secondi... (Tentativo ${attempt}/${MAX_RETRIES})`;
+        console.log(retryMsg);
+        
+        if (onStatusUpdate) {
+          onStatusUpdate(retryMsg);
+        }
+        
         await wait(delayTime);
         continue;
       } else {
-        // If it's not a retry-able error (e.g. 400 Bad Request, Safety Filter) or max retries reached
         break;
       }
     }
   }
 
-  // If we exit the loop without returning, throw the last error nicely
   console.error("Gemini API Error Final:", lastError);
   
-  // Better error message for user
   let errorMessage = "Si è verificato un errore durante la trasformazione.";
   
   if (lastError?.message?.includes("400")) {
     errorMessage = "Errore nell'immagine inviata o nella richiesta. Riprova con un'altra foto.";
   } else if (lastError?.message?.includes("429")) {
-    errorMessage = "Il server è molto occupato (Troppe richieste). Riprova tra un minuto.";
+    errorMessage = "Il server è sovraccarico per troppe richieste. Attendi un minuto e riprova più tardi.";
   } else if (lastError?.message?.includes("SAFETY")) {
     errorMessage = "L'immagine o la descrizione violano le policy di sicurezza. Riprova.";
   } else if (lastError?.message?.includes("API Key")) {
