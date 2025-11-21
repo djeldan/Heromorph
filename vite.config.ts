@@ -3,39 +3,30 @@ import react from '@vitejs/plugin-react'
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  // Carica variabili da file .env (se presenti locale)
-  // Cast process to any to avoid TS error: Property 'cwd' does not exist on type 'Process'
-  const env = loadEnv(mode, (process as any).cwd(), '');
+  // Carica le variabili dal file .env (se in locale)
+  // @ts-ignore - process.cwd() esiste in Node ma TS a volte si lamenta in config vite
+  const env = loadEnv(mode, process.cwd(), '');
   
-  // Accedi direttamente alle variabili di processo (fondamentale per Netlify/CI)
-  // Usiamo 'as any' per evitare errori TS se i tipi node non sono perfetti nell'ambiente
-  const processEnv = process.env as any;
+  // Cerca la chiave API in vari punti
+  // process.env ha priorità per Netlify/CI
+  const apiKey = process.env.API_KEY || env.API_KEY || process.env.VITE_API_KEY || env.VITE_API_KEY || '';
 
-  // Cerca la chiave in tutti i posti possibili, dando priorità all'ambiente di processo (Netlify)
-  const foundKey = 
-    processEnv.API_KEY || env.API_KEY || 
-    processEnv.VITE_API_KEY || env.VITE_API_KEY || 
-    processEnv.GOOGLE_API_KEY || env.GOOGLE_API_KEY || 
-    '';
-
-  // Log di build per debug (visibile nei log di Netlify)
-  if (foundKey && foundKey.length > 10) {
-    console.log(`[Vite Build] ✅ API Key rilevata! Inizia con: ${foundKey.substring(0, 5)}...`);
+  // Log (visibile solo nella console di build di Netlify)
+  if (!apiKey) {
+    console.warn('⚠️ ATTENZIONE: Nessuna API_KEY trovata durante la build. L\'app richiederà una chiave manuale o fallirà.');
   } else {
-    console.error(`[Vite Build] ⚠️ ATTENZIONE: Nessuna API Key trovata durante la build! L'app non funzionerà.`);
-    console.log('Variabili disponibili (keys):', Object.keys(processEnv).filter(k => !k.startsWith('npm_')));
+    console.log('✅ API_KEY rilevata correttamente durante la build.');
   }
 
   return {
     plugins: [react()],
     define: {
-      // Inietta la chiave nel codice client in modo sicuro
-      'process.env.API_KEY': JSON.stringify(foundKey)
+      // Inietta la variabile nel codice frontend
+      'process.env.API_KEY': JSON.stringify(apiKey)
     },
     build: {
       outDir: 'dist',
       sourcemap: false,
-      minify: 'esbuild',
     }
   }
 })

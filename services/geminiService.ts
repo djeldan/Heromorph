@@ -11,36 +11,35 @@ export const transformToSuperhero = async (
   onStatusUpdate?: (message: string) => void
 ): Promise<string> => {
   
-  const apiKey = process.env.API_KEY;
+  // TENTATIVO 1: Variabile d'ambiente (da Netlify/Build)
+  let apiKey = process.env.API_KEY;
+
+  // TENTATIVO 2: LocalStorage (Fallback d'emergenza per l'utente)
+  if (!apiKey || apiKey.trim() === '') {
+    const localKey = localStorage.getItem('HEROMORPH_API_KEY');
+    if (localKey && localKey.trim().length > 10) {
+      console.log('[GeminiService] Uso chiave di riserva da LocalStorage');
+      apiKey = localKey;
+    }
+  }
   
-  // DIAGNOSTICA AVANZATA PER L'UTENTE
-  const keyLen = apiKey ? apiKey.length : 0;
-  const keyStart = apiKey && keyLen > 4 ? apiKey.substring(0, 4) : 'N/A';
-  const keyStatus = !apiKey ? "MANCANTE (Undefined)" : (apiKey.trim() === "" ? "VUOTA (Empty String)" : "PRESENTE");
-  
-  console.log(`[GeminiService] Key Status: ${keyStatus}, Start: ${keyStart}`);
+  // Diagnostica per debug
+  const keyStatus = apiKey && apiKey.length > 10 ? "PRESENTE" : "MANCANTE";
+  console.log(`[GeminiService] Stato API Key: ${keyStatus}`);
 
   // 1. Controllo presenza chiave
   if (!apiKey || apiKey.trim() === '') {
     throw new Error(
-      `ERRORE CONFIGURAZIONE (Key: ${keyStatus}). ` +
-      `L'app non vede la chiave API. ` +
-      `AZIONE RICHIESTA: Vai su Netlify > Deploys > 'Trigger deploy' > 'Clear cache and deploy site'.`
+      `CHIAVE API MANCANTE. ` +
+      `Il server non ha passato la chiave. ` +
+      `SOLUZIONE RAPIDA: Apri la console (F12), scrivi "localStorage.setItem('HEROMORPH_API_KEY', 'LA_TUA_CHIAVE')" e ricarica.`
     );
   }
 
-  // 2. Controllo formato chiave (Le chiavi Google iniziano quasi sempre con AIza)
-  if (!apiKey.startsWith("AIza")) {
-    throw new Error(
-      `CHIAVE NON VALIDA (Inizia con: '${keyStart}'). ` +
-      `La chiave rilevata non sembra una chiave Google Gemini valida. Controlla di non aver incollato spazi vuoti su Netlify.`
-    );
-  }
-
+  // 2. Inizializza SDK
   const ai = new GoogleGenAI({ apiKey });
 
   // Extract MIME type and Clean Base64 data dynamically
-  // Improved regex to handle more mime types
   const mimeMatch = imageBase64.match(/^data:(image\/[\w+.-]+);base64,/);
   const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
   const cleanBase64 = imageBase64.replace(/^data:image\/[\w+.-]+;base64,/, '');
@@ -96,26 +95,24 @@ export const transformToSuperhero = async (
         throw new Error("SAFETY_BLOCK");
       }
       
-      throw new Error("Il modello ha risposto ma non ha generato l'immagine.");
+      throw new Error("Il modello ha risposto ma non ha generato l'immagine (Nessun dato visivo).");
 
     } catch (error: any) {
       lastError = error;
       console.warn(`Attempt ${attempt} failed:`, error.message);
 
-      const isQuotaError = error.message?.includes("429") || error.message?.includes("Too Many Requests") || error.message?.includes("exhausted");
-      const isServerBusy = error.message?.includes("503") || error.message?.includes("Overloaded");
-      const isSafety = error.message?.includes("SAFETY") || error.message?.includes("SAFETY_BLOCK");
+      const errStr = error.message || error.toString();
+      const isQuota = errStr.includes("429") || errStr.includes("Too Many Requests");
+      const isBusy = errStr.includes("503") || errStr.includes("Overloaded");
+      const isSafety = errStr.includes("SAFETY") || errStr.includes("SAFETY_BLOCK");
 
       if (isSafety) {
-        throw new Error("L'immagine è stata bloccata dai filtri di sicurezza (Safety). Prova con una foto diversa o un prompt meno aggressivo.");
+        throw new Error("L'immagine è stata bloccata dai filtri di sicurezza (Safety). Prova con una foto diversa.");
       }
 
-      if ((isQuotaError || isServerBusy) && attempt < MAX_RETRIES) {
-        const waitTime = 5000 * Math.pow(2, attempt); // Exponential backoff: 10s, 20s...
-        const seconds = waitTime / 1000;
-        const retryMsg = `Server occupato o Limite Traffico. Riprovo tra ${seconds}s... (Tentativo ${attempt}/${MAX_RETRIES})`;
-        
-        if (onStatusUpdate) onStatusUpdate(retryMsg);
+      if ((isQuota || isBusy) && attempt < MAX_RETRIES) {
+        const waitTime = 3000 * Math.pow(2, attempt); 
+        if (onStatusUpdate) onStatusUpdate(`Server occupato. Riprovo tra ${waitTime/1000}s...`);
         await wait(waitTime);
         continue;
       } else {
@@ -124,24 +121,22 @@ export const transformToSuperhero = async (
     }
   }
   
-  // Traduzione errori finale
+  // Gestione Errori Finale
   const errString = lastError?.toString() || "";
   let errorMessage = "Si è verificato un errore imprevisto.";
   
   if (errString.includes("400")) {
-    errorMessage = "Richiesta non valida (400). L'immagine potrebbe essere corrotta o il formato non supportato.";
+    errorMessage = "Errore 400: Immagine non valida o corrotta.";
   } else if (errString.includes("403")) {
-    errorMessage = `Accesso Negato (403). La chiave API è presente (${keyStart}...) ma rifiutata da Google. Verifica di aver abilitato la 'Gemini API' nel Google Cloud Console e di avere il Billing attivo (necessario per alcuni modelli).`;
-  } else if (errString.includes("429") || errString.includes("exhausted")) {
-    errorMessage = "Limite richieste superato (429). Il piano gratuito ha raggiunto il limite. Attendi 60 secondi.";
+    errorMessage = `Errore 403 (Accesso Negato). La chiave API è valida ma rifiutata. Verifica di aver abilitato la "Generative Language API" nel tuo progetto Google Cloud.`;
+  } else if (errString.includes("429")) {
+    errorMessage = "Errore 429: Limite richieste superato. Attendi qualche minuto.";
   } else if (errString.includes("SAFETY")) {
-    errorMessage = "Blocco Sicurezza: L'IA ha rifiutato di generare l'immagine per motivi di sicurezza.";
-  } else if (errString.includes("ERRORE CONFIGURAZIONE") || errString.includes("CHIAVE NON VALIDA")) {
-    errorMessage = lastError.message; 
-  } else if (errString.includes("fetch") || errString.includes("Network")) {
-    errorMessage = "Errore di connessione. Controlla la tua rete.";
+    errorMessage = "Blocco Sicurezza: Immagine non generata per policy di sicurezza.";
+  } else if (errString.includes("fetch")) {
+    errorMessage = "Errore di rete. Controlla la connessione.";
   } else {
-    errorMessage = `Errore Tecnico: ${lastError?.message || errString}`;
+    errorMessage = lastError?.message || errString;
   }
   
   throw new Error(errorMessage);
