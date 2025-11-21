@@ -12,7 +12,7 @@ const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [image, setImage] = useState<string | null>(null);
   
-  // State for selection
+  // State for selection - Solo custom prompt ora
   const [customPrompt, setCustomPrompt] = useState<string>('');
   
   const [resultImage, setResultImage] = useState<string | null>(null);
@@ -42,7 +42,7 @@ const App: React.FC = () => {
     }
     
     if (!customPrompt.trim()) {
-      setError("Per favore scrivi una descrizione per il tuo eroe.");
+      setError("Per favore descrivi il tuo eroe.");
       return;
     }
 
@@ -50,8 +50,8 @@ const App: React.FC = () => {
     setError(null);
 
     try {
-      // Always treat as custom prompt since the preset selector is removed
-      const result = await transformToSuperhero(image, customPrompt, true);
+      // Passiamo l'immagine e il prompt personalizzato
+      const result = await transformToSuperhero(image, customPrompt);
       setResultImage(result);
       setStatus(AppStatus.SUCCESS);
 
@@ -75,10 +75,10 @@ const App: React.FC = () => {
   const handleReset = () => {
     setStatus(AppStatus.IDLE);
     setResultImage(null);
-    // Keep image and settings for easy retry
+    // Manteniamo l'immagine caricata per facilitare nuovi tentativi
   };
 
-  const isReady = image && customPrompt.trim().length > 0;
+  const isReady = image && customPrompt.trim().length > 2;
 
   return (
     <div className="min-h-screen bg-[#0f172a] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-[#0f172a] to-black flex flex-col">
@@ -121,18 +121,18 @@ const App: React.FC = () => {
                     onClick={handleTransform}
                     disabled={!isReady}
                     className={`
-                      relative overflow-hidden group px-8 py-4 rounded-full font-bold text-lg tracking-wide transition-all duration-300
+                      relative overflow-hidden group px-10 py-5 rounded-full font-bold text-lg tracking-wide transition-all duration-300 shadow-2xl
                       ${isReady
-                        ? 'bg-white text-slate-900 hover:scale-105 shadow-[0_0_40px_-10px_rgba(139,92,246,0.5)]' 
-                        : 'bg-slate-800 text-slate-500 cursor-not-allowed'}
+                        ? 'bg-white text-slate-900 hover:scale-105 shadow-violet-500/50' 
+                        : 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50'}
                     `}
                   >
-                    <span className="flex items-center gap-2 relative z-10">
-                      <Wand2 className={isReady ? "animate-pulse" : ""} />
-                      TRASFORMA ORA
+                    <span className="flex items-center gap-3 relative z-10">
+                      <Wand2 className={`w-6 h-6 ${isReady ? "animate-pulse text-violet-600" : ""}`} />
+                      GENERA EROE
                     </span>
                     {isReady && (
-                      <div className="absolute inset-0 bg-gradient-to-r from-violet-400 via-fuchsia-400 to-violet-400 opacity-0 group-hover:opacity-20 transition-opacity duration-300"></div>
+                      <div className="absolute inset-0 bg-gradient-to-r from-violet-200 via-white to-violet-200 opacity-0 group-hover:opacity-100 transition-opacity duration-500 mix-blend-overlay"></div>
                     )}
                   </button>
                 </div>
@@ -140,7 +140,7 @@ const App: React.FC = () => {
             )}
 
             {error && (
-              <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 flex items-center gap-2 animate-in slide-in-from-bottom-2">
+              <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 flex items-center gap-2 animate-in slide-in-from-bottom-2 backdrop-blur-sm">
                 <AlertCircle size={20} />
                 <span>{error}</span>
               </div>
@@ -150,21 +150,24 @@ const App: React.FC = () => {
 
       </main>
 
-      <footer className="w-full py-8 flex justify-center items-center pb-12">
-        <a 
-          href="https://www.instagram.com/djeldan_official/"
-          target="_blank"
-          rel="noopener noreferrer" 
-          className="relative group cursor-pointer" 
-          title="Visita il profilo Instagram di DDR"
-        >
-          <div className="absolute -inset-4 bg-violet-500/20 blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-full"></div>
-          <img 
-            src="https://i.postimg.cc/HVYg5MNw/Logo-DDR.png"
-            alt="Logo-DDR" 
-            className="h-12 md:h-14 w-auto object-contain drop-shadow-2xl hover:scale-105 transition-transform duration-300 filter hover:brightness-110"
-          />
-        </a>
+      <footer className="w-full py-8 flex justify-center items-center pb-12 text-slate-600 text-sm">
+        <div className="flex flex-col items-center gap-2">
+          <a 
+            href="https://www.instagram.com/djeldan_official/"
+            target="_blank"
+            rel="noopener noreferrer" 
+            className="relative group cursor-pointer" 
+            title="Visita il profilo Instagram di DDR"
+          >
+            <div className="absolute -inset-4 bg-violet-500/20 blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-full"></div>
+            <img 
+              src="https://i.postimg.cc/HVYg5MNw/Logo-DDR.png"
+              alt="Logo-DDR" 
+              className="h-12 md:h-14 w-auto object-contain drop-shadow-2xl hover:scale-105 transition-transform duration-300 filter hover:brightness-110"
+            />
+          </a>
+          <span className="opacity-50 mt-2">Powered by Gemini 2.5 Flash</span>
+        </div>
       </footer>
     </div>
   );
