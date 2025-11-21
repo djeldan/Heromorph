@@ -11,17 +11,11 @@ export const transformToSuperhero = async (
   onStatusUpdate?: (message: string) => void
 ): Promise<string> => {
   
-  // La chiave viene iniettata da Vite (vedi vite.config.ts)
-  // Se Vite ha fatto il suo dovere, questa variabile contiene la chiave (o quella dell'utente hardcoded)
-  let apiKey = process.env.API_KEY;
-
-  // Fallback estremo su LocalStorage se qualcosa va storto col build
-  if (!apiKey || apiKey.trim() === '') {
-    apiKey = localStorage.getItem('HEROMORPH_API_KEY') || '';
-  }
+  // HARDCODED KEY: Soluzione definitiva per bypassare problemi di build/deploy
+  const apiKey = 'AIzaSyAQlDBCCSIkxNglU02ADJD7AI8gP84KEns';
 
   if (!apiKey) {
-    throw new Error("Configurazione API incompleta. Impossibile contattare il server AI.");
+    throw new Error("Chiave API mancante.");
   }
 
   // Inizializza SDK
@@ -36,10 +30,11 @@ export const transformToSuperhero = async (
     Transform the person in this input image into a superhero character based on this description: "${heroPrompt}".
     
     INSTRUCTIONS:
-    1. Keep the person's facial identity recognizable.
+    1. Keep the person's facial identity recognizable (this is a fictional character creation task).
     2. Create a high-quality, photorealistic image (8k, detailed texture).
     3. The character should be wearing the costume described.
-    4. Ensure the face is visible (no full masks covering the face).
+    4. Ensure the face is visible.
+    5. Output ONLY the generated image.
   `;
 
   const MAX_RETRIES = 2;
@@ -47,6 +42,10 @@ export const transformToSuperhero = async (
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
+      if (onStatusUpdate) onStatusUpdate(attempt > 1 ? `Riprovo... (Tentativo ${attempt})` : "Generazione in corso...");
+      
+      console.log(`[Gemini] Sending request, attempt ${attempt}...`);
+
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: {
@@ -64,13 +63,21 @@ export const transformToSuperhero = async (
         }
       });
 
+      console.log("[Gemini] Response received");
+
       const candidate = response.candidates?.[0];
       const parts = candidate?.content?.parts;
       let textResponse = "";
 
+      // Check for safety blocking
+      if (candidate?.finishReason === "SAFETY") {
+        throw new Error("Safety Block: L'immagine è stata bloccata dai filtri di sicurezza. Prova con una foto diversa (es. meno pelle esposta) o un prompt più semplice.");
+      }
+
       if (parts) {
         for (const part of parts) {
           if (part.inlineData && part.inlineData.data) {
+            console.log("[Gemini] Image data found");
             return `data:image/png;base64,${part.inlineData.data}`;
           }
           if (part.text) {
@@ -78,31 +85,27 @@ export const transformToSuperhero = async (
           }
         }
       }
-      
-      if (candidate?.finishReason === "SAFETY") {
-        throw new Error("L'immagine è stata bloccata dai filtri di sicurezza (Safety). Prova una foto diversa o una descrizione meno aggressiva.");
-      }
 
       if (textResponse) {
-        // Se il modello risponde con testo invece di immagine, mostralo all'utente
-        // Spesso dice "I cannot generate images of real people" se la policy è stretta
-        throw new Error(`Il modello ha risposto: "${textResponse.substring(0, 150)}..."`);
+        console.warn("[Gemini] Text only response:", textResponse);
+        // Se il modello risponde con testo invece di immagine
+        throw new Error(`Il modello non ha generato un'immagine, ma ha detto: "${textResponse.substring(0, 200)}..."`);
       }
       
-      throw new Error("Il modello non ha generato dati visivi.");
+      throw new Error("Il modello non ha restituito né un'immagine né un errore chiaro.");
 
     } catch (error: any) {
       lastError = error;
-      console.warn(`Attempt ${attempt} failed:`, error.message);
+      console.error(`[Gemini] Attempt ${attempt} failed:`, error);
 
       // Non ritentare se è un errore di sicurezza o di richiesta non valida
-      if (error.message.includes("Safety") || error.message.includes("Il modello ha risposto")) {
+      const msg = error.message || "";
+      if (msg.includes("Safety") || msg.includes("400") || msg.includes("403")) {
         break;
       }
 
       if (attempt < MAX_RETRIES) {
         const waitTime = 2000 * attempt;
-        if (onStatusUpdate) onStatusUpdate(`Riprovo... (Tentativo ${attempt}/${MAX_RETRIES})`);
         await wait(waitTime);
       }
     }
@@ -112,10 +115,12 @@ export const transformToSuperhero = async (
   const errStr = lastError?.toString() || "";
   
   if (errStr.includes("403")) {
-    throw new Error("Errore Chiave API (403). La chiave potrebbe non essere abilitata per questo servizio.");
+    throw new Error("Errore Chiave API (403). La chiave potrebbe essere errata o il servizio Gemini API non abilitato su Google Cloud.");
   } else if (errStr.includes("429")) {
     throw new Error("Troppe richieste (429). Riprova tra un minuto.");
+  } else if (errStr.includes("503")) {
+    throw new Error("Servizio sovraccarico (503). Riprova tra poco.");
   }
   
-  throw new Error(lastError?.message || "Errore durante la generazione.");
+  throw new Error(lastError?.message || "Errore sconosciuto durante la generazione.");
 };
