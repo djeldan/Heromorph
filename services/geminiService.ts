@@ -11,32 +11,20 @@ export const transformToSuperhero = async (
   onStatusUpdate?: (message: string) => void
 ): Promise<string> => {
   
-  // TENTATIVO 1: Variabile d'ambiente (da Netlify/Build)
+  // La chiave viene iniettata da Vite (vedi vite.config.ts)
+  // Se Vite ha fatto il suo dovere, questa variabile contiene la chiave (o quella dell'utente hardcoded)
   let apiKey = process.env.API_KEY;
 
-  // TENTATIVO 2: LocalStorage (Fallback d'emergenza per l'utente)
+  // Fallback estremo su LocalStorage se qualcosa va storto col build
   if (!apiKey || apiKey.trim() === '') {
-    const localKey = localStorage.getItem('HEROMORPH_API_KEY');
-    if (localKey && localKey.trim().length > 10) {
-      console.log('[GeminiService] Uso chiave di riserva da LocalStorage');
-      apiKey = localKey;
-    }
-  }
-  
-  // Diagnostica per debug
-  const keyStatus = apiKey && apiKey.length > 10 ? "PRESENTE" : "MANCANTE";
-  console.log(`[GeminiService] Stato API Key: ${keyStatus}`);
-
-  // 1. Controllo presenza chiave
-  if (!apiKey || apiKey.trim() === '') {
-    throw new Error(
-      `CHIAVE API MANCANTE. ` +
-      `Il server non ha passato la chiave. ` +
-      `SOLUZIONE RAPIDA: Apri la console (F12), scrivi "localStorage.setItem('HEROMORPH_API_KEY', 'LA_TUA_CHIAVE')" e ricarica.`
-    );
+    apiKey = localStorage.getItem('HEROMORPH_API_KEY') || '';
   }
 
-  // 2. Inizializza SDK
+  if (!apiKey) {
+    throw new Error("Configurazione API incompleta. Impossibile contattare il server AI.");
+  }
+
+  // Inizializza SDK
   const ai = new GoogleGenAI({ apiKey });
 
   // Extract MIME type and Clean Base64 data dynamically
@@ -47,18 +35,14 @@ export const transformToSuperhero = async (
   const prompt = `
     Transform the person in this input image into a superhero character based on this description: "${heroPrompt}".
     
-    CRITICAL INSTRUCTIONS FOR ULTRA-REALISM:
-    1. **IDENTITY PRESERVATION**: You MUST preserve the exact facial features, skin tone, ethnicity, hair color, and eye color of the person in the source image. The face must remain recognizable as the original person.
-    2. **NO MASK**: The superhero MUST NOT wear a mask, helmet, or cowl covering the face. The face must be completely uncovered and visible.
-    3. **PHOTOREALISTIC STYLE**: Generate an ULTRA-REALISTIC, 8K RAW PHOTOGRAPH.
-       - Ensure visible skin pores, texture, and subtle imperfections (do not smooth skin excessively).
-       - Realistic lighting (volumetric, dramatic shadows, subsurface scattering).
-       - High-quality textures for the costume (metal reflection, fabric weave, leather grain).
-    4. **COMPOSITION**: Cinematic DSLR quality, sharp focus on the face, depth of field.
-    5. **CONTEXT**: Place them in a fitting environment for the character described.
+    INSTRUCTIONS:
+    1. Keep the person's facial identity recognizable.
+    2. Create a high-quality, photorealistic image (8k, detailed texture).
+    3. The character should be wearing the costume described.
+    4. Ensure the face is visible (no full masks covering the face).
   `;
 
-  const MAX_RETRIES = 3;
+  const MAX_RETRIES = 2;
   let lastError: any = null;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -82,62 +66,56 @@ export const transformToSuperhero = async (
 
       const candidate = response.candidates?.[0];
       const parts = candidate?.content?.parts;
+      let textResponse = "";
 
       if (parts) {
         for (const part of parts) {
           if (part.inlineData && part.inlineData.data) {
             return `data:image/png;base64,${part.inlineData.data}`;
           }
+          if (part.text) {
+            textResponse += part.text;
+          }
         }
       }
       
       if (candidate?.finishReason === "SAFETY") {
-        throw new Error("SAFETY_BLOCK");
+        throw new Error("L'immagine è stata bloccata dai filtri di sicurezza (Safety). Prova una foto diversa o una descrizione meno aggressiva.");
+      }
+
+      if (textResponse) {
+        // Se il modello risponde con testo invece di immagine, mostralo all'utente
+        // Spesso dice "I cannot generate images of real people" se la policy è stretta
+        throw new Error(`Il modello ha risposto: "${textResponse.substring(0, 150)}..."`);
       }
       
-      throw new Error("Il modello ha risposto ma non ha generato l'immagine (Nessun dato visivo).");
+      throw new Error("Il modello non ha generato dati visivi.");
 
     } catch (error: any) {
       lastError = error;
       console.warn(`Attempt ${attempt} failed:`, error.message);
 
-      const errStr = error.message || error.toString();
-      const isQuota = errStr.includes("429") || errStr.includes("Too Many Requests");
-      const isBusy = errStr.includes("503") || errStr.includes("Overloaded");
-      const isSafety = errStr.includes("SAFETY") || errStr.includes("SAFETY_BLOCK");
-
-      if (isSafety) {
-        throw new Error("L'immagine è stata bloccata dai filtri di sicurezza (Safety). Prova con una foto diversa.");
+      // Non ritentare se è un errore di sicurezza o di richiesta non valida
+      if (error.message.includes("Safety") || error.message.includes("Il modello ha risposto")) {
+        break;
       }
 
-      if ((isQuota || isBusy) && attempt < MAX_RETRIES) {
-        const waitTime = 3000 * Math.pow(2, attempt); 
-        if (onStatusUpdate) onStatusUpdate(`Server occupato. Riprovo tra ${waitTime/1000}s...`);
+      if (attempt < MAX_RETRIES) {
+        const waitTime = 2000 * attempt;
+        if (onStatusUpdate) onStatusUpdate(`Riprovo... (Tentativo ${attempt}/${MAX_RETRIES})`);
         await wait(waitTime);
-        continue;
-      } else {
-        break;
       }
     }
   }
   
-  // Gestione Errori Finale
-  const errString = lastError?.toString() || "";
-  let errorMessage = "Si è verificato un errore imprevisto.";
+  // Gestione Errori Finale più chiara
+  const errStr = lastError?.toString() || "";
   
-  if (errString.includes("400")) {
-    errorMessage = "Errore 400: Immagine non valida o corrotta.";
-  } else if (errString.includes("403")) {
-    errorMessage = `Errore 403 (Accesso Negato). La chiave API è valida ma rifiutata. Verifica di aver abilitato la "Generative Language API" nel tuo progetto Google Cloud.`;
-  } else if (errString.includes("429")) {
-    errorMessage = "Errore 429: Limite richieste superato. Attendi qualche minuto.";
-  } else if (errString.includes("SAFETY")) {
-    errorMessage = "Blocco Sicurezza: Immagine non generata per policy di sicurezza.";
-  } else if (errString.includes("fetch")) {
-    errorMessage = "Errore di rete. Controlla la connessione.";
-  } else {
-    errorMessage = lastError?.message || errString;
+  if (errStr.includes("403")) {
+    throw new Error("Errore Chiave API (403). La chiave potrebbe non essere abilitata per questo servizio.");
+  } else if (errStr.includes("429")) {
+    throw new Error("Troppe richieste (429). Riprova tra un minuto.");
   }
   
-  throw new Error(errorMessage);
+  throw new Error(lastError?.message || "Errore durante la generazione.");
 };
