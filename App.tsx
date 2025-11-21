@@ -6,15 +6,12 @@ import { ProcessingView } from './components/ProcessingView';
 import { ResultView } from './components/ResultView';
 import { transformToSuperhero } from './services/geminiService';
 import { AppStatus } from './types';
-import { Wand2, AlertCircle, Info, Settings } from 'lucide-react';
+import { Wand2, AlertCircle, Info, Settings, RefreshCw } from 'lucide-react';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [image, setImage] = useState<string | null>(null);
-  
-  // State for selection - Solo custom prompt ora
   const [customPrompt, setCustomPrompt] = useState<string>('');
-  
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>("");
@@ -53,7 +50,6 @@ const App: React.FC = () => {
     setError(null);
 
     try {
-      // Passiamo l'immagine, il prompt e una callback per aggiornare lo stato in caso di retry
       const result = await transformToSuperhero(image, customPrompt, (msg) => {
         setLoadingMessage(msg);
       });
@@ -82,7 +78,6 @@ const App: React.FC = () => {
     setStatus(AppStatus.IDLE);
     setResultImage(null);
     setLoadingMessage("");
-    // Manteniamo l'immagine caricata per facilitare nuovi tentativi
   };
 
   const isReady = image && customPrompt.trim().length > 2;
@@ -151,39 +146,39 @@ const App: React.FC = () => {
             {error && (
               <div className="mt-8 w-full max-w-2xl mx-auto animate-in slide-in-from-bottom-2">
                 <div className="p-5 bg-red-500/10 border border-red-500/30 rounded-xl flex flex-col gap-2 backdrop-blur-sm">
-                  <div className="flex items-center gap-3 text-red-400 font-semibold">
-                     <AlertCircle size={20} />
-                     <span>Errore Generazione</span>
+                  <div className="flex items-start gap-3 text-red-400 font-semibold">
+                     <AlertCircle size={20} className="mt-1 flex-shrink-0" />
+                     <div>
+                       <span>Errore Generazione</span>
+                       <p className="text-slate-300 text-sm font-normal mt-1 leading-relaxed">
+                        {error}
+                       </p>
+                     </div>
                   </div>
-                  <p className="text-slate-300 text-sm leading-relaxed pl-8">
-                    {error}
-                  </p>
                   
                   {(error.includes("CONFIGURAZIONE") || error.includes("CHIAVE") || error.includes("403")) && (
-                    <div className="mt-3 pl-8 flex flex-wrap gap-3">
-                        <a 
-                          href="https://app.netlify.com" 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 text-xs bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg border border-slate-600 transition-colors"
-                        >
-                          <Settings size={14} /> Vai su Netlify
-                        </a>
-                        <div className="text-xs text-slate-400 flex items-center">
-                           Importante: Dopo aver salvato la Key, fai "Trigger Deploy" {'>'} "Clear cache".
+                    <div className="mt-4 pl-8 flex flex-col gap-2">
+                        <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
+                           <p className="text-xs text-slate-400 font-bold mb-1 uppercase">Soluzione Rapida:</p>
+                           <ol className="text-xs text-slate-300 list-decimal list-inside space-y-1">
+                              <li>Vai su Netlify dashboard &gt; Deploys</li>
+                              <li>Clicca su <strong>"Trigger deploy"</strong></li>
+                              <li>Seleziona <strong>"Clear cache and deploy site"</strong></li>
+                           </ol>
+                        </div>
+                        <div className="flex gap-3 mt-2">
+                          <a 
+                            href="https://app.netlify.com" 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 text-xs bg-violet-600 hover:bg-violet-500 text-white px-4 py-2 rounded-lg transition-colors"
+                          >
+                            <Settings size={14} /> Apri Netlify
+                          </a>
                         </div>
                     </div>
                   )}
                 </div>
-                
-                {(error.includes("Limite") || error.includes("Traffico")) && (
-                   <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-blue-300 flex items-start gap-3 text-xs max-w-2xl mx-auto">
-                      <Info size={16} className="flex-shrink-0 mt-0.5" />
-                      <p>
-                        <strong>Consiglio Pro:</strong> Stai usando il piano gratuito. Aspetta un minuto completo prima di riprovare per ricaricare la tua quota.
-                      </p>
-                   </div>
-                )}
               </div>
             )}
           </div>
