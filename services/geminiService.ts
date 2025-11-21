@@ -18,8 +18,13 @@ export const transformToSuperhero = async (
   
   const apiKey = process.env.API_KEY;
   
-  if (!apiKey) {
-    throw new Error("API Key non trovata. Assicurati di aver configurato la variabile d'ambiente API_KEY.");
+  // Controllo rigoroso della Chiave API per debugging su Netlify
+  if (!apiKey || apiKey.trim() === '') {
+    throw new Error("CONFIGURAZIONE MANCANTE: La API KEY non è stata trovata. Su Netlify, vai su Site Settings > Environment Variables, aggiungi 'API_KEY' e poi fai 'Trigger Deploy' > 'Clear cache and deploy'.");
+  }
+
+  if (!apiKey.startsWith("AIza")) {
+    throw new Error("CHIAVE NON VALIDA: La API Key sembra errata (dovrebbe iniziare con 'AIza'). Controlla le impostazioni di Netlify.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -43,8 +48,10 @@ export const transformToSuperhero = async (
     5. **CONTEXT**: Place them in a fitting environment for the character described.
   `;
 
-  // Aumentato a 5 tentativi con backoff esponenziale per gestire meglio i limiti di quota
-  const MAX_RETRIES = 5;
+  // Strategia Retry Conservativa per Piano Gratuito su Netlify
+  // Il piano free ha limiti di circa 15 RPM (Requests Per Minute).
+  // Se facciamo retry troppo veloci, bruciamo la quota in un attimo.
+  const MAX_RETRIES = 3;
   let lastError: any = null;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -77,31 +84,42 @@ export const transformToSuperhero = async (
         }
       }
       
-      throw new Error("Nessuna immagine generata. Riprova con una descrizione diversa.");
+      // Se arriviamo qui, il modello ha risposto ma senza immagine (forse solo testo o safety block)
+      // Controlliamo se c'è un finishReason di sicurezza
+      if (candidate?.finishReason === "SAFETY") {
+        throw new Error("SAFETY_BLOCK");
+      }
+      
+      throw new Error("Il modello ha risposto ma non ha generato l'immagine. Riprova.");
 
     } catch (error: any) {
       lastError = error;
       console.warn(`Attempt ${attempt} failed:`, error.message);
 
-      const isRetryable = error.message?.includes("429") || error.message?.includes("503");
+      // Gestione specifica errori
+      const isQuotaError = error.message?.includes("429") || error.message?.includes("Too Many Requests") || error.message?.includes("Resource has been exhausted");
+      const isServerBusy = error.message?.includes("503") || error.message?.includes("Overloaded");
+      const isSafety = error.message?.includes("SAFETY");
 
-      if (isRetryable && attempt < MAX_RETRIES) {
-        // Exponential backoff: 2s, 4s, 8s, 16s... + jitter casuale
-        const baseDelay = 1000 * Math.pow(2, attempt);
-        const jitter = Math.random() * 1000;
-        const delayTime = baseDelay + jitter;
-        const seconds = Math.ceil(delayTime / 1000);
+      if (isSafety) {
+        throw new Error("L'immagine è stata bloccata dai filtri di sicurezza di Google. Prova con una foto diversa o una posa meno 'aggressiva'.");
+      }
 
-        const retryMsg = `Server molto occupato. Riprovo automaticamente tra ${seconds} secondi... (Tentativo ${attempt}/${MAX_RETRIES})`;
-        console.log(retryMsg);
+      if ((isQuotaError || isServerBusy) && attempt < MAX_RETRIES) {
+        // Aumento i tempi di attesa: 6s, 12s, 18s. 
+        // Questo è necessario perché il limite RPM resetta ogni minuto.
+        const waitTime = 6000 * attempt; 
+        const seconds = waitTime / 1000;
+
+        const retryMsg = isQuotaError 
+          ? `Traffico intenso (Limite Free Tier). Attendo ${seconds}s per "raffreddare" l'API... (Tentativo ${attempt}/${MAX_RETRIES})`
+          : `Server Google occupato. Riprovo tra ${seconds}s... (Tentativo ${attempt}/${MAX_RETRIES})`;
         
-        if (onStatusUpdate) {
-          onStatusUpdate(retryMsg);
-        }
-        
-        await wait(delayTime);
+        if (onStatusUpdate) onStatusUpdate(retryMsg);
+        await wait(waitTime);
         continue;
       } else {
+        // Errore non recuperabile o tentativi finiti
         break;
       }
     }
@@ -109,16 +127,24 @@ export const transformToSuperhero = async (
 
   console.error("Gemini API Error Final:", lastError);
   
-  let errorMessage = "Si è verificato un errore durante la trasformazione.";
+  // Messaggi utente finali chiari
+  let errorMessage = "Si è verificato un errore imprevisto.";
+  const errString = lastError?.toString() || "";
   
-  if (lastError?.message?.includes("400")) {
-    errorMessage = "Errore nell'immagine inviata o nella richiesta. Riprova con un'altra foto.";
-  } else if (lastError?.message?.includes("429")) {
-    errorMessage = "Il server è sovraccarico per troppe richieste. Attendi un minuto e riprova più tardi.";
-  } else if (lastError?.message?.includes("SAFETY")) {
-    errorMessage = "L'immagine o la descrizione violano le policy di sicurezza. Riprova.";
-  } else if (lastError?.message?.includes("API Key")) {
-      errorMessage = lastError.message;
+  if (errString.includes("400")) {
+    errorMessage = "Immagine non valida o corrotta. Prova a ricaricare la pagina o usare un'altra foto.";
+  } else if (errString.includes("403")) {
+    errorMessage = "Accesso Negato (403). La Chiave API potrebbe non avere i permessi corretti o il progetto GCP ha problemi di fatturazione/quota.";
+  } else if (errString.includes("429") || errString.includes("Resource has been exhausted")) {
+    errorMessage = "Troppe richieste in poco tempo. Il piano gratuito di Google ha un limite. Attendi 1 minuto completo e riprova.";
+  } else if (errString.includes("SAFETY") || errString.includes("blocked")) {
+    errorMessage = "L'immagine generata violava le policy di sicurezza (violenza, contenuti espliciti, ecc). Riprova con un prompt più tranquillo.";
+  } else if (errString.includes("API Key")) {
+      errorMessage = "Problema Chiave API. Verifica le variabili d'ambiente su Netlify.";
+  } else if (errString.includes("fetch failed")) {
+      errorMessage = "Errore di connessione. Controlla la tua rete.";
+  } else {
+      errorMessage = `Errore API: ${lastError?.message || errString}`;
   }
   
   throw new Error(errorMessage);

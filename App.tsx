@@ -6,7 +6,7 @@ import { ProcessingView } from './components/ProcessingView';
 import { ResultView } from './components/ResultView';
 import { transformToSuperhero } from './services/geminiService';
 import { AppStatus } from './types';
-import { Wand2, AlertCircle } from 'lucide-react';
+import { Wand2, AlertCircle, Info } from 'lucide-react';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
@@ -149,9 +149,38 @@ const App: React.FC = () => {
             )}
 
             {error && (
-              <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 flex items-center gap-2 animate-in slide-in-from-bottom-2 backdrop-blur-sm max-w-md text-center">
-                <AlertCircle size={20} className="flex-shrink-0" />
-                <span>{error}</span>
+              <div className="mt-8 w-full max-w-2xl mx-auto animate-in slide-in-from-bottom-2">
+                <div className="p-5 bg-red-500/10 border border-red-500/30 rounded-xl flex flex-col gap-2 backdrop-blur-sm">
+                  <div className="flex items-center gap-3 text-red-400 font-semibold">
+                     <AlertCircle size={20} />
+                     <span>Errore Generazione</span>
+                  </div>
+                  <p className="text-slate-300 text-sm leading-relaxed pl-8">
+                    {error}
+                  </p>
+                  
+                  {(error.includes("Netlify") || error.includes("API")) && (
+                    <div className="mt-2 pl-8">
+                        <a 
+                          href="https://app.netlify.com" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-xs bg-red-500/20 hover:bg-red-500/30 text-red-300 px-3 py-1 rounded border border-red-500/30 transition-colors"
+                        >
+                          Apri Netlify Dashboard
+                        </a>
+                    </div>
+                  )}
+                </div>
+                
+                {error.includes("Traffico") && (
+                   <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-blue-300 flex items-start gap-3 text-xs max-w-2xl mx-auto">
+                      <Info size={16} className="flex-shrink-0 mt-0.5" />
+                      <p>
+                        <strong>Consiglio:</strong> L'API gratuita ha un "contatore" al minuto. Se vedi questo errore, aspetta semplicemente un minuto senza cliccare, poi riprova.
+                      </p>
+                   </div>
+                )}
               </div>
             )}
           </div>
