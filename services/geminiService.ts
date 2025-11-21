@@ -18,13 +18,20 @@ export const transformToSuperhero = async (
   
   const apiKey = process.env.API_KEY;
   
+  // DEBUG: Loggare (parzialmente) cosa vede l'app
+  const keyStatus = apiKey 
+    ? `Presente (inizia con ${apiKey.substring(0, 4)}...)` 
+    : "ASSENTE/UNDEFINED";
+    
+  console.log(`[GeminiService] Controllo API Key: ${keyStatus}`);
+
   // Controllo rigoroso della Chiave API per debugging su Netlify
   if (!apiKey || apiKey.trim() === '') {
-    throw new Error("CONFIGURAZIONE MANCANTE: La API KEY non è stata trovata. Su Netlify, vai su Site Settings > Environment Variables, aggiungi 'API_KEY' e poi fai 'Trigger Deploy' > 'Clear cache and deploy'.");
+    throw new Error(`CONFIGURAZIONE MANCANTE (Status: ${keyStatus}). L'app non trova la chiave API. Su Netlify, assicurati che la variabile sia 'API_KEY' (o 'VITE_API_KEY') e fai un REDEPLOY (Clear cache and deploy site) dopo averla inserita.`);
   }
 
   if (!apiKey.startsWith("AIza")) {
-    throw new Error("CHIAVE NON VALIDA: La API Key sembra errata (dovrebbe iniziare con 'AIza'). Controlla le impostazioni di Netlify.");
+    throw new Error(`CHIAVE NON VALIDA (Status: ${keyStatus}). La chiave rilevata non sembra una chiave Google valida (deve iniziare con 'AIza'). Controlla di non aver incollato spazi extra o virgolette su Netlify.`);
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -106,13 +113,12 @@ export const transformToSuperhero = async (
       }
 
       if ((isQuotaError || isServerBusy) && attempt < MAX_RETRIES) {
-        // Aumento i tempi di attesa: 6s, 12s, 18s. 
-        // Questo è necessario perché il limite RPM resetta ogni minuto.
-        const waitTime = 6000 * attempt; 
+        // Aumento i tempi di attesa: 8s, 15s, 22s per Netlify Free Tier
+        const waitTime = 7000 * attempt; 
         const seconds = waitTime / 1000;
 
         const retryMsg = isQuotaError 
-          ? `Traffico intenso (Limite Free Tier). Attendo ${seconds}s per "raffreddare" l'API... (Tentativo ${attempt}/${MAX_RETRIES})`
+          ? `Traffico intenso (Limite Free Tier). Attendo ${seconds}s per ricaricare i token... (Tentativo ${attempt}/${MAX_RETRIES})`
           : `Server Google occupato. Riprovo tra ${seconds}s... (Tentativo ${attempt}/${MAX_RETRIES})`;
         
         if (onStatusUpdate) onStatusUpdate(retryMsg);
@@ -134,7 +140,7 @@ export const transformToSuperhero = async (
   if (errString.includes("400")) {
     errorMessage = "Immagine non valida o corrotta. Prova a ricaricare la pagina o usare un'altra foto.";
   } else if (errString.includes("403")) {
-    errorMessage = "Accesso Negato (403). La Chiave API potrebbe non avere i permessi corretti o il progetto GCP ha problemi di fatturazione/quota.";
+    errorMessage = `Accesso Negato (403). La Chiave API (${keyStatus}) potrebbe non essere abilitata per Gemini API o il progetto Google Cloud ha problemi di fatturazione.`;
   } else if (errString.includes("429") || errString.includes("Resource has been exhausted")) {
     errorMessage = "Troppe richieste in poco tempo. Il piano gratuito di Google ha un limite. Attendi 1 minuto completo e riprova.";
   } else if (errString.includes("SAFETY") || errString.includes("blocked")) {
